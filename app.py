@@ -15,6 +15,7 @@ from reportlab.lib.pagesizes import letter, A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import inch
+import time
 
 # Load environment variables
 load_dotenv()
@@ -50,40 +51,38 @@ def init_spotify():
         st.error("""
         ⚠️ **Spotify API credentials not found!**
         
-        Please follow these steps:
-        1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
-        2. Create a new app
-        3. Copy your Client ID and Client Secret
-        4. Create a `.env` file with:
+        Please set up your credentials in Streamlit Cloud:
+        1. Go to your app settings
+        2. Navigate to Secrets
+        3. Add:
         ```
-        SPOTIFY_CLIENT_ID=your_client_id_here
-        SPOTIFY_CLIENT_SECRET=your_client_secret_here
+        SPOTIFY_CLIENT_ID = "your_client_id_here"
+        SPOTIFY_CLIENT_SECRET = "your_client_secret_here"
         ```
         """)
         return None
     
     try:
+        # Use a longer timeout
         client_credentials_manager = SpotifyClientCredentials(
             client_id=client_id,
             client_secret=client_secret
         )
-        sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
         
-        # Simple test - search for a track to verify connection
-        # This is a basic API call that should work everywhere
-        results = sp.search(q='test', limit=1, type='track')
+        # Create client with custom settings
+        sp = spotipy.Spotify(
+            client_credentials_manager=client_credentials_manager,
+            requests_timeout=10,
+            retries=3
+        )
         
         return sp
+        
     except Exception as e:
         st.error(f"""
         ⚠️ **Failed to authenticate with Spotify!**
         
         Error: {str(e)}
-        
-        Please check:
-        1. Your Client ID and Client Secret are correct
-        2. Your app is properly set up in the Spotify Developer Dashboard
-        3. Your internet connection is working
         """)
         return None
 
@@ -111,6 +110,21 @@ def get_relative_group(scale_name):
         return f"{RELATIVE_SCALES_REVERSE[scale_name]} ↔ {scale_name}"
     return scale_name
 
+def fetch_audio_features_single(sp, track_id):
+    """Fetch audio features for a single track with retry logic"""
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            features = sp.audio_features([track_id])
+            if features and features[0]:
+                return features[0]
+            return None
+        except Exception as e:
+            if attempt < max_retries - 1:
+                time.sleep(0.5 * (attempt + 1))  # Exponential backoff
+                continue
+            return None
+
 def fetch_playlist_data(sp, playlist_id):
     """Fetch playlist tracks and their audio features"""
     tracks_data = []
@@ -118,7 +132,10 @@ def fetch_playlist_data(sp, playlist_id):
     try:
         # Get playlist info first
         playlist = sp.playlist(playlist_id)
-        st.info(f"Fetching {playlist['tracks']['total']} tracks from '{playlist['name']}'...")
+        playlist_name = playlist['name']
+        total_tracks = playlist['tracks']['total']
+        
+        st.info(f"Fetching {total_tracks} tracks from '{playlist_name}'...")
         
         # Get playlist tracks
         results = sp.playlist_tracks(playlist_id)
@@ -128,135 +145,106 @@ def fetch_playlist_data(sp, playlist_id):
             results = sp.next(results)
             tracks.extend(results['items'])
         
-        # Filter out None tracks and local files
+        # Filter valid tracks
         valid_tracks = []
-        track_ids = []
-        
         for track in tracks:
-            if track['track'] and track['track']['id'] and not track['is_local']:
+            if (track.get('track') and 
+                track['track'].get('id') and 
+                not track.get('is_local', False) and
+                track['track'].get('type') == 'track'):
                 valid_tracks.append(track)
-                track_ids.append(track['track']['id'])
         
-        if not track_ids:
+        if not valid_tracks:
             st.warning("No valid tracks found in the playlist")
             return pd.DataFrame()
         
-        st.info(f"Found {len(track_ids)} valid tracks. Fetching audio features...")
+        st.info(f"Processing {len(valid_tracks)} valid tracks...")
         
-        # Progress bar
+        # Progress tracking
         progress_bar = st.progress(0)
         progress_text = st.empty()
+        successful_tracks = 0
+        failed_tracks = 0
         
-        # Get audio features for each track (max 100 per request)
-        for i in range(0, len(track_ids), 100):
-            batch_ids = track_ids[i:i+100]
+        # Process tracks individually to handle 403 errors better
+        for idx, track_item in enumerate(valid_tracks):
+            track = track_item['track']
+            track_id = track['id']
             
-            try:
-                # Debug: Show which batch we're processing
-                progress_text.text(f"Processing tracks: {i+1}-{min(i+100, len(track_ids))} of {len(track_ids)}")
-                
-                audio_features = sp.audio_features(batch_ids)
-                
-                if audio_features is None:
-                    st.warning(f"No audio features returned for batch {i//100 + 1}")
-                    continue
-                
-                for j, features in enumerate(audio_features):
-                    track_index = i + j
-                    if track_index < len(valid_tracks):
-                        track = valid_tracks[track_index]['track']
-                        
-                        if features:
-                            tracks_data.append({
-                                'name': track['name'],
-                                'artist': ', '.join([artist['name'] for artist in track['artists']]),
-                                'key': features['key'] if features['key'] is not None else -1,
-                                'mode': features['mode'] if features['mode'] is not None else 0,
-                                'scale': get_scale_name(
-                                    features['key'] if features['key'] is not None else -1, 
-                                    features['mode'] if features['mode'] is not None else 0
-                                ),
-                                'tempo': features.get('tempo', 0),
-                                'energy': features.get('energy', 0),
-                                'valence': features.get('valence', 0)
-                            })
-                        else:
-                            # Track without audio features
-                            tracks_data.append({
-                                'name': track['name'],
-                                'artist': ', '.join([artist['name'] for artist in track['artists']]),
-                                'key': -1,
-                                'mode': 0,
-                                'scale': 'Unknown',
-                                'tempo': 0,
-                                'energy': 0,
-                                'valence': 0
-                            })
-                
-                # Update progress
-                progress = min((i + len(batch_ids)) / len(track_ids), 1.0)
-                progress_bar.progress(progress)
-                
-            except spotipy.exceptions.SpotifyException as e:
-                if e.http_status == 403:
-                    st.error("""
-                    ⚠️ **Access Forbidden (403 Error)**
-                    
-                    This usually means:
-                    1. Your Spotify app might not have the correct permissions
-                    2. The Client ID/Secret might be incorrect
-                    3. Your app might be in development mode with limited access
-                    
-                    Please check:
-                    - Your app status in the Spotify Developer Dashboard
-                    - Regenerate your Client Secret if needed
-                    - Make sure your app is not rate-limited
-                    """)
-                    return pd.DataFrame()
-                else:
-                    st.warning(f"Error fetching audio features for batch {i//100 + 1}: {str(e)}")
-                    continue
-            except Exception as e:
-                st.warning(f"Unexpected error for batch {i//100 + 1}: {str(e)}")
-                continue
+            # Update progress
+            progress = (idx + 1) / len(valid_tracks)
+            progress_bar.progress(progress)
+            progress_text.text(f"Processing: {idx + 1}/{len(valid_tracks)} tracks (Success: {successful_tracks}, Failed: {failed_tracks})")
+            
+            # Try to get audio features
+            features = fetch_audio_features_single(sp, track_id)
+            
+            if features:
+                tracks_data.append({
+                    'name': track['name'],
+                    'artist': ', '.join([artist['name'] for artist in track['artists']]),
+                    'key': features.get('key', -1),
+                    'mode': features.get('mode', 0),
+                    'scale': get_scale_name(
+                        features.get('key', -1),
+                        features.get('mode', 0)
+                    ),
+                    'tempo': features.get('tempo', 0),
+                    'energy': features.get('energy', 0),
+                    'valence': features.get('valence', 0)
+                })
+                successful_tracks += 1
+            else:
+                # Add track without audio features
+                tracks_data.append({
+                    'name': track['name'],
+                    'artist': ', '.join([artist['name'] for artist in track['artists']]),
+                    'key': -1,
+                    'mode': 0,
+                    'scale': 'Unknown',
+                    'tempo': 0,
+                    'energy': 0,
+                    'valence': 0
+                })
+                failed_tracks += 1
+            
+            # Small delay to avoid rate limiting
+            if idx % 10 == 0:
+                time.sleep(0.1)
         
         # Clear progress indicators
         progress_bar.empty()
         progress_text.empty()
         
         if not tracks_data:
-            st.warning("Could not retrieve audio features for any tracks")
+            st.error("Could not retrieve any track data")
             return pd.DataFrame()
         
-        st.success(f"Successfully analyzed {len(tracks_data)} tracks!")
+        # Show summary
+        if failed_tracks > 0:
+            st.warning(f"""
+            ⚠️ Partial data retrieved:
+            - Successfully analyzed: {successful_tracks} tracks
+            - Failed to analyze: {failed_tracks} tracks
+            
+            Some tracks may show as "Unknown" scale due to API limitations.
+            """)
+        else:
+            st.success(f"✅ Successfully analyzed all {successful_tracks} tracks!")
+        
         return pd.DataFrame(tracks_data)
         
     except spotipy.exceptions.SpotifyException as e:
         if e.http_status == 404:
             st.error("Playlist not found. Please check the URL and make sure it's a public playlist.")
-        elif e.http_status == 403:
-            st.error("Access forbidden. Please check your Spotify app credentials.")
+        elif e.http_status == 401:
+            st.error("Authentication failed. Please check your Spotify credentials.")
         else:
-            st.error(f"Spotify API error: {str(e)}")
+            st.error(f"Spotify API error ({e.http_status}): {str(e)}")
         return pd.DataFrame()
     except Exception as e:
-        st.error(f"Error fetching playlist data: {str(e)}")
+        st.error(f"Unexpected error: {str(e)}")
         return pd.DataFrame()
-
-def test_spotify_connection(sp):
-    """Test Spotify connection with a simple search"""
-    try:
-        # Try a simple search
-        results = sp.search(q='test', limit=1, type='track')
-        if results and 'tracks' in results and results['tracks']['items']:
-            st.success("✅ Spotify connection successful!")
-            return True
-        else:
-            st.error("Connection test failed - no results returned")
-            return False
-    except Exception as e:
-        st.error(f"Connection test failed: {str(e)}")
-        return False
 
 def create_distribution_charts(df, classification_type):
     """Create distribution charts for scales"""
@@ -316,14 +304,16 @@ def export_to_excel(df):
         df.to_excel(writer, sheet_name='Playlist Analysis', index=False)
         
         # Summary sheet
+        df_known = df[df['scale'] != 'Unknown']
         summary_df = pd.DataFrame({
-            'Metric': ['Total Songs', 'Major Songs', 'Minor Songs', 'Unknown Songs', 'Most Common Scale'],
+            'Metric': ['Total Songs', 'Songs with Scale Data', 'Songs without Scale Data', 'Major Songs', 'Minor Songs', 'Most Common Scale'],
             'Value': [
                 len(df),
-                len(df[df['mode'] == 1]),
-                len(df[df['mode'] == 0]),
+                len(df_known),
                 len(df[df['scale'] == 'Unknown']),
-                df[df['scale'] != 'Unknown']['scale'].mode()[0] if not df[df['scale'] != 'Unknown'].empty else 'N/A'
+                len(df_known[df_known['mode'] == 1]) if not df_known.empty else 0,
+                len(df_known[df_known['mode'] == 0]) if not df_known.empty else 0,
+                df_known['scale'].mode()[0] if not df_known.empty else 'N/A'
             ]
         })
         summary_df.to_excel(writer, sheet_name='Summary', index=False)
@@ -353,7 +343,7 @@ def export_to_excel(df):
         worksheet1.set_column('B:B', 30)  # Artist
         worksheet1.set_column('C:C', 15)  # Scale
         
-        worksheet2.set_column('A:A', 20)
+        worksheet2.set_column('A:A', 25)
         worksheet2.set_column('B:B', 20)
     
     return output.getvalue()
@@ -374,12 +364,13 @@ def export_to_pdf(df, playlist_name):
     
     # Summary statistics
     df_known = df[df['scale'] != 'Unknown']
-    major_count = len(df_known[df_known['mode'] == 1])
-    minor_count = len(df_known[df_known['mode'] == 0])
+    major_count = len(df_known[df_known['mode'] == 1]) if not df_known.empty else 0
+    minor_count = len(df_known[df_known['mode'] == 0]) if not df_known.empty else 0
     unknown_count = len(df[df['scale'] == 'Unknown'])
     
     summary_data = [
         ['Total Songs', str(len(df))],
+        ['Songs with Scale Data', str(len(df_known))],
         ['Major Songs', str(major_count)],
         ['Minor Songs', str(minor_count)],
         ['Unknown Scale', str(unknown_count)],
@@ -401,6 +392,7 @@ def export_to_pdf(df, playlist_name):
     elements.append(Spacer(1, 0.5*inch))
     
     # Track list table
+        # Track list table
     elements.append(Paragraph("Track List by Scale", styles['Heading2']))
     elements.append(Spacer(1, 0.2*inch))
     
@@ -427,7 +419,7 @@ def export_to_pdf(df, playlist_name):
         ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
         ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
         ('FONTSIZE', (0, 1), (-1, -1), 9),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
     ]))
     
     elements.append(track_table)
@@ -445,6 +437,16 @@ def main():
     # Initialize Spotify client
     sp = init_spotify()
     if not sp:
+        st.info("""
+        ### How to set up Spotify credentials:
+        
+        1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
+        2. Create a new app or use an existing one
+        3. Copy your Client ID and Client Secret
+        4. Add them to your Streamlit app's secrets
+        
+        **Note**: This app only analyzes public playlists and doesn't require user login.
+        """)
         return
     
     # Sidebar for input
@@ -472,13 +474,15 @@ def main():
         - Major vs Minor analysis
         - Export to Excel/PDF
         - Scale explorer
+        
+        **Note**: Some tracks may show as "Unknown" if Spotify doesn't have scale data for them.
         """)
     
     if analyze_button and playlist_url:
         playlist_id = extract_playlist_id(playlist_url)
         
         if not playlist_id:
-            st.error("Invalid Spotify playlist URL")
+            st.error("Invalid Spotify playlist URL. Please make sure you're using a valid playlist link.")
             return
         
         with st.spinner("Fetching playlist data..."):
@@ -536,11 +540,11 @@ def main():
             with col1:
                 st.metric("Total Songs", len(df))
             with col2:
-                st.metric("Major Songs", len(df[df['mode'] == 1]))
+                st.metric("Songs with Scale Data", len(df_known))
             with col3:
-                st.metric("Minor Songs", len(df[df['mode'] == 0]))
+                st.metric("Major Songs", len(df_known[df_known['mode'] == 1]) if not df_known.empty else 0)
             with col4:
-                st.metric("Unknown Scales", len(df[df['scale'] == 'Unknown']))
+                st.metric("Minor Songs", len(df_known[df_known['mode'] == 0]) if not df_known.empty else 0)
             
             # Additional insights
             if not df_known.empty:
@@ -552,12 +556,12 @@ def main():
                     st.metric("Most Common Scale", most_common)
                 
                 with col2:
-                    avg_tempo = df_known['tempo'].mean()
-                    st.metric("Average Tempo", f"{avg_tempo:.1f} BPM")
+                    avg_tempo = df_known[df_known['tempo'] > 0]['tempo'].mean()
+                    st.metric("Average Tempo", f"{avg_tempo:.1f} BPM" if not pd.isna(avg_tempo) else "N/A")
                 
                 with col3:
-                    avg_energy = df_known['energy'].mean()
-                    st.metric("Average Energy", f"{avg_energy:.2f}")
+                    avg_energy = df_known[df_known['energy'] > 0]['energy'].mean()
+                    st.metric("Average Energy", f"{avg_energy:.2f}" if not pd.isna(avg_energy) else "N/A")
         
         with tab2:
             # Display track list
@@ -573,29 +577,37 @@ def main():
                 
                 # Filter by search term
                 if search_term:
-                    mask = (df_display['name'].str.contains(search_term, case=False) | 
-                           df_display['artist'].str.contains(search_term, case=False))
+                    mask = (df_display['name'].str.contains(search_term, case=False, na=False) | 
+                           df_display['artist'].str.contains(search_term, case=False, na=False))
                     df_display = df_display[mask]
                 
-                st.dataframe(
-                    df_display[['name', 'artist', 'scale', 'Scale Group', 'tempo', 'energy', 'valence']],
-                    use_container_width=True,
-                    height=600
-                )
+                # Show data
+                if not df_display.empty:
+                    st.dataframe(
+                        df_display[['name', 'artist', 'scale', 'Scale Group']],
+                        use_container_width=True,
+                        height=600
+                    )
+                else:
+                    st.info("No tracks found matching your search.")
             else:
                 df_display = df.copy()
                 
                 # Filter by search term
                 if search_term:
-                    mask = (df_display['name'].str.contains(search_term, case=False) | 
-                           df_display['artist'].str.contains(search_term, case=False))
+                    mask = (df_display['name'].str.contains(search_term, case=False, na=False) | 
+                           df_display['artist'].str.contains(search_term, case=False, na=False))
                     df_display = df_display[mask]
                 
-                st.dataframe(
-                    df_display[['name', 'artist', 'scale', 'tempo', 'energy', 'valence']],
-                    use_container_width=True,
-                    height=600
-                )
+                # Show data
+                if not df_display.empty:
+                    st.dataframe(
+                        df_display[['name', 'artist', 'scale']],
+                        use_container_width=True,
+                        height=600
+                    )
+                else:
+                    st.info("No tracks found matching your search.")
         
         with tab3:
             # Scale explorer
@@ -624,17 +636,28 @@ def main():
                 # Show average characteristics
                 if selected_scale != "Unknown" and not filtered_df.empty:
                     st.markdown("**Average Characteristics:**")
-                    st.write(f"Tempo: {filtered_df['tempo'].mean():.1f} BPM")
-                    st.write(f"Energy: {filtered_df['energy'].mean():.2f}")
-                    st.write(f"Valence: {filtered_df['valence'].mean():.2f}")
+                    
+                    valid_tempo = filtered_df[filtered_df['tempo'] > 0]['tempo']
+                    valid_energy = filtered_df[filtered_df['energy'] > 0]['energy']
+                    valid_valence = filtered_df[filtered_df['valence'] > 0]['valence']
+                    
+                    if not valid_tempo.empty:
+                        st.write(f"Tempo: {valid_tempo.mean():.1f} BPM")
+                    if not valid_energy.empty:
+                        st.write(f"Energy: {valid_energy.mean():.2f}")
+                    if not valid_valence.empty:
+                        st.write(f"Valence: {valid_valence.mean():.2f}")
             
             with col2:
                 st.write(f"**Tracks in {selected_scale}:**")
-                st.dataframe(
-                    filtered_df[['name', 'artist', 'tempo', 'energy', 'valence']],
-                    use_container_width=True,
-                    height=400
-                )
+                if not filtered_df.empty:
+                    st.dataframe(
+                        filtered_df[['name', 'artist']],
+                        use_container_width=True,
+                        height=400
+                    )
+                else:
+                    st.info("No tracks found in this scale.")
         
         with tab4:
             # Export options
@@ -643,7 +666,7 @@ def main():
             st.markdown("""
             Download your playlist analysis in your preferred format:
             - **Excel**: Includes summary statistics and full track list
-            - **PDF**: Formatted report with visualizations summary
+            - **PDF**: Formatted report with summary data
             """)
             
             col1, col2 = st.columns(2)
@@ -675,14 +698,15 @@ def main():
             st.subheader("Export Preview")
             
             with st.expander("View Summary Statistics"):
+                df_known = df[df['scale'] != 'Unknown']
                 summary_stats = {
                     'Total Songs': len(df),
-                    'Major Songs': len(df[df['mode'] == 1]),
-                    'Minor Songs': len(df[df['mode'] == 0]),
-                    'Unknown Songs': len(df[df['scale'] == 'Unknown']),
-                    'Most Common Scale': df[df['scale'] != 'Unknown']['scale'].mode()[0] if not df[df['scale'] != 'Unknown'].empty else 'N/A',
-                    'Average Tempo': f"{df[df['tempo'] > 0]['tempo'].mean():.1f} BPM" if not df[df['tempo'] > 0].empty else 'N/A',
-                    'Average Energy': f"{df[df['energy'] > 0]['energy'].mean():.2f}" if not df[df['energy'] > 0].empty else 'N/A'
+                    'Songs with Scale Data': len(df_known),
+                    'Songs without Scale Data': len(df[df['scale'] == 'Unknown']),
+                    'Major Songs': len(df_known[df_known['mode'] == 1]) if not df_known.empty else 0,
+                    'Minor Songs': len(df_known[df_known['mode'] == 0]) if not df_known.empty else 0,
+                    'Most Common Scale': df_known['scale'].mode()[0] if not df_known.empty else 'N/A',
+                    'Success Rate': f"{(len(df_known) / len(df) * 100):.1f}%" if len(df) > 0 else "0%"
                 }
                 
                 for key, value in summary_stats.items():
