@@ -5,6 +5,7 @@ from spotdl import Spotdl
 import dotenv
 dotenv.load_dotenv()
 
+
 def download_spotify(url, output_dir="./temp"):
     """
     Download audio from Spotify using SpotDL Python API.
