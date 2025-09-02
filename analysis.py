@@ -5,6 +5,20 @@ import os
 from cache_utils import get_file_hash, load_from_cache, save_to_cache
 from constants import KRUMHANSL_MAJOR, KRUMHANSL_MINOR, KEY_NAMES
 
+
+def relative_major_minor(key_index, mode):
+    """Return relative key (major <-> minor)"""
+    if mode == "minor":  
+        # relative major is +3 semitones
+        rel_index = (key_index + 3) % 12
+        return f"{KEY_NAMES[rel_index]} major"
+    elif mode == "major":
+        # relative minor is -3 semitones (or +9)
+        rel_index = (key_index - 3) % 12
+        return f"{KEY_NAMES[rel_index]} minor"
+    return ""
+
+
 def detect_key_librosa(filepath, use_cache=True):
     """Detect key and scale using librosa with Krumhansl-Schmuckler algorithm"""
     try:
@@ -65,7 +79,9 @@ def detect_key_librosa(filepath, use_cache=True):
         # Spectral centroid (brightness)
         cent = librosa.feature.spectral_centroid(y=y, sr=sr)
         brightness = float(np.mean(cent))
-        
+
+        rel = relative_major_minor(key_index, mode)
+
         results = {
             "key": detected_key,
             "mode": mode,
@@ -73,7 +89,7 @@ def detect_key_librosa(filepath, use_cache=True):
             "tempo": round(float(tempo), 1),
             "energy": round(energy, 3),
             "brightness": round(brightness, 1),
-            "scale": f"{detected_key} {mode}"
+            "scale": f"{detected_key}{'m' if mode=='minor' else ''}/{rel.split()[0]}" 
         }
         
         # Save to cache

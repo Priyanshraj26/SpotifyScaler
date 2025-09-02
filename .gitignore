@@ -33,3 +33,5 @@ Thumbs.db
 .cache
 temp_upload/
 temp.py
+temp/
+cache/

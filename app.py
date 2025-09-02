@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 
 # Import all modules
-from constants import TEMP_DIR, UPLOAD_DIR, SUPPORTED_AUDIO_FORMATS, CACHE_DIR
+from constants import TEMP_DIR, UPLOAD_DIR, CACHE_DIR, SUPPORTED_AUDIO_FORMATS  # Added CACHE_DIR
 from cache_utils import cleanup_temp, ensure_directories
 from spotify_utils import download_spotify
 from analysis import detect_key_librosa, analyze_files, calculate_key_transitions
@@ -162,7 +162,7 @@ def display_results():
 def display_visualizations_tab(df):
     """Display visualization charts"""
     # Create visualizations
-    fig_keys, fig_mode, fig_tempo, fig_conf, fig_circle = create_visualizations(df)
+    fig_keys, fig_mode, fig_tempo, fig_conf= create_visualizations(df)
     
     # Display charts
     col1, col2 = st.columns(2)
@@ -173,9 +173,7 @@ def display_visualizations_tab(df):
     with col2:
         st.plotly_chart(fig_mode, use_container_width=True)
         st.plotly_chart(fig_conf, use_container_width=True)
-    
-    # Circle of fifths
-    st.plotly_chart(fig_circle, use_container_width=True)
+
     
     # Additional analysis for playlists
     if len(df) > 2:
@@ -189,7 +187,7 @@ def display_visualizations_tab(df):
 def main():
     """Main application function"""
     st.title("🎵 Spotify Key Analyzer")
-    st.markdown("Analyze musical keys and scales using spotDL + librosa")
+    
     
     # Display disclaimer
     display_disclaimer()

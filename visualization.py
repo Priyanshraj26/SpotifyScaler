@@ -1,7 +1,6 @@
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
-from constants import CIRCLE_OF_FIFTHS_ORDER
 
 def create_visualizations(df):
     """Create all analysis visualizations"""
@@ -9,9 +8,8 @@ def create_visualizations(df):
     fig_mode = create_mode_pie_chart(df)
     fig_tempo = create_tempo_histogram(df)
     fig_conf = create_confidence_box_plot(df)
-    fig_circle = create_circle_of_fifths(df)
     
-    return fig_keys, fig_mode, fig_tempo, fig_conf, fig_circle
+    return fig_keys, fig_mode, fig_tempo, fig_conf
 
 def create_key_distribution_chart(df):
     """Create bar chart for key distribution"""
@@ -78,52 +76,6 @@ def create_confidence_box_plot(df):
         title="Key Detection Confidence by Mode",
         labels={'confidence': 'Confidence Score', 'mode': 'Mode'}
     )
-    
-    return fig
-
-def create_circle_of_fifths(df):
-    """Create circle of fifths visualization"""
-    circle_data = df.groupby('key').size().reset_index(name='count')
-    
-    # Create complete data with zeros for missing keys
-    complete_circle_data = []
-    for key in CIRCLE_OF_FIFTHS_ORDER:
-        count = circle_data[circle_data['key'] == key]['count'].values
-        complete_circle_data.append({
-            'key': key,
-            'count': count[0] if len(count) > 0 else 0
-        })
-    
-    circle_df = pd.DataFrame(complete_circle_data)
-    
-    fig = go.Figure()
-    
-    if circle_df['count'].sum() > 0:
-        fig.add_trace(go.Scatterpolar(
-            r=circle_df['count'],
-            theta=circle_df['key'],
-            fill='toself',
-            name='Track Count',
-            line_color='rgb(106, 90, 205)',
-            fillcolor='rgba(106, 90, 205, 0.3)'
-        ))
-        
-        fig.update_layout(
-            polar=dict(
-                radialaxis=dict(
-                    visible=True,
-                    range=[0, max(circle_df['count'].max() * 1.1, 1)]
-                )),
-            showlegend=False,
-            title="Keys on Circle of Fifths"
-        )
-    else:
-        fig.add_annotation(
-            text="No key data available",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5, showarrow=False
-        )
-        fig.update_layout(title="Keys on Circle of Fifths")
     
     return fig
 
