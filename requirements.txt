@@ -1,7 +1,8 @@
 streamlit
-spotipy
-pandas
+panda
+numpy
+librosa
+soundfile
 plotly
-python-dotenv
+spotdl
 xlsxwriter
-reportlab

@@ -31,3 +31,5 @@ Thumbs.db
 *.pdf
 
 .cache
+temp_upload/
+temp.py
