@@ -6,3 +6,7 @@ soundfile
 plotly
 spotdl
 xlsxwriter
+numba
+reportlab
+python-dotenv
+scipy

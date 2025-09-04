@@ -35,3 +35,4 @@ temp_upload/
 temp.py
 temp/
 cache/
+secrets.toml
