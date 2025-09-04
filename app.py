@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 
 # Import all modules
-from constants import TEMP_DIR, UPLOAD_DIR, CACHE_DIR, SUPPORTED_AUDIO_FORMATS  # Added CACHE_DIR
+from constants import TEMP_DIR, UPLOAD_DIR, CACHE_DIR, SUPPORTED_AUDIO_FORMATS
 from cache_utils import cleanup_temp, ensure_directories
 from spotify_utils import download_spotify
 from analysis import detect_key_librosa, analyze_files, calculate_key_transitions
@@ -124,7 +124,7 @@ def handle_spotify_input(input_mode, use_cache, auto_cleanup):
         except Exception as e:
             st.error(f"Error: {str(e)}")
 
-def display_results():
+def display_results(confidence_threshold, show_alternatives):
     """Display analysis results"""
     df = st.session_state.analysis_results
     
@@ -141,7 +141,7 @@ def display_results():
         display_visualizations_tab(df)
     
     with tab3:
-        display_detailed_results_tab(df)
+        display_detailed_results_tab(df, confidence_threshold, show_alternatives)
     
     with tab4:
         # Prepare export data
@@ -162,7 +162,7 @@ def display_results():
 def display_visualizations_tab(df):
     """Display visualization charts"""
     # Create visualizations
-    fig_keys, fig_mode, fig_tempo, fig_conf= create_visualizations(df)
+    fig_keys, fig_mode, fig_tempo, fig_conf = create_visualizations(df)
     
     # Display charts
     col1, col2 = st.columns(2)
@@ -187,13 +187,13 @@ def display_visualizations_tab(df):
 def main():
     """Main application function"""
     st.title("🎵 Spotify Key Analyzer")
-    
+    st.markdown("Analyze musical keys and scales using spotDL + librosa")
     
     # Display disclaimer
     display_disclaimer()
     
-    # Get sidebar settings
-    input_mode, use_cache, auto_cleanup = display_sidebar_settings()
+    # Get ALL sidebar settings (now returns 5 values)
+    input_mode, use_cache, auto_cleanup, confidence_threshold, show_alternatives = display_sidebar_settings()
     
     # Manual cleanup button in sidebar
     with st.sidebar:
@@ -208,9 +208,9 @@ def main():
     else:
         handle_spotify_input(input_mode, use_cache, auto_cleanup)
     
-    # Display results if available
+    # Display results if available - pass the settings as parameters
     if st.session_state.analysis_results is not None:
-        display_results()
+        display_results(confidence_threshold, show_alternatives)
 
 if __name__ == "__main__":
     # Ensure directories exist
