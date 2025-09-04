@@ -1,4 +1,4 @@
-# Spotify Key Analyzer
+# Spotify Scaler
 
 ## Inspiration
 As a keen musician, I thought to make this project to help my fellow musicians, for finding the key of the songs and the tempo for their practice. The beginners might get lost at the start. Please keep in mind, machine can be wrong in many instances, so trust your musical skills, your listening abilities and your gut to follow your profession. Don't depend on these applications fully :)
@@ -18,7 +18,7 @@ As a keen musician, I thought to make this project to help my fellow musicians, 
 
 ## Overview
 
-Spotify Key Analyzer is a Python-based application that combines Spotify's metadata with advanced audio analysis to determine the musical key, scale, tempo, and other audio features of songs. It uses the Krumhansl-Schmuckler algorithm enhanced with multiple key profiles for accurate key detection.
+Spotify Scaler is a Python-based application that combines Spotify's metadata with advanced audio analysis to determine the musical key, scale, tempo, and other audio features of songs. It uses the Krumhansl-Schmuckler algorithm enhanced with multiple key profiles for accurate key detection.
 
 ## Features
 
@@ -375,3 +375,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ---
 
 **Note:** This tool is for educational and personal use only. Respect copyright laws and Spotify's terms of service.
+
