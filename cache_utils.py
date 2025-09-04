@@ -2,6 +2,8 @@ import os
 import json
 import hashlib
 import shutil
+import time
+from pathlib import Path
 from constants import CACHE_DIR
 
 def ensure_directories(*directories):
@@ -62,13 +64,118 @@ def clear_cache():
             return False
     return True
 
-def cleanup_temp(dir_path):
-    """Safely remove temporary directory"""
-    if os.path.exists(dir_path):
+def clear_specific_cache(file_hash):
+    """Clear cache for a specific file"""
+    if not file_hash:
+        return False
+    
+    cache_file = os.path.join(CACHE_DIR, f"{file_hash}.json")
+    if os.path.exists(cache_file):
         try:
-            shutil.rmtree(dir_path)
+            os.remove(cache_file)
             return True
         except Exception as e:
-            print(f"Error cleaning up {dir_path}: {e}")
+            print(f"Error removing cache file: {e}")
             return False
-    return True
+    return False
+
+def cleanup_temp(dir_path):
+    """Safely remove temporary directory with retry logic"""
+    if not os.path.exists(dir_path):
+        return True
+    
+    # Try multiple times with delays (Windows file locking issues)
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            # First, try to remove all files
+            for file_path in Path(dir_path).glob("*"):
+                try:
+                    if file_path.is_file():
+                        file_path.unlink()
+                except Exception as e:
+                    print(f"Error deleting file {file_path}: {e}")
+            
+            # Then remove the directory
+            shutil.rmtree(dir_path)
+            return True
+            
+        except Exception as e:
+            if attempt < max_attempts - 1:
+                time.sleep(0.5)  # Wait before retry
+                continue
+            else:
+                print(f"Error cleaning up {dir_path} after {max_attempts} attempts: {e}")
+                return False
+    
+    return False
+
+def force_cleanup_temp(dir_path):
+    """Force cleanup with OS-specific commands"""
+    if not os.path.exists(dir_path):
+        return True
+    
+    try:
+        if os.name == 'nt':  # Windows
+            os.system(f'rmdir /s /q "{dir_path}"')
+        else:  # Unix/Linux/Mac
+            os.system(f'rm -rf "{dir_path}"')
+        return True
+    except Exception as e:
+        print(f"Force cleanup failed: {e}")
+        return False
+
+def get_cache_info():
+    """Get information about cached files"""
+    if not os.path.exists(CACHE_DIR):
+        return {"count": 0, "size": 0, "files": []}
+    
+    cache_files = list(Path(CACHE_DIR).glob("*.json"))
+    total_size = sum(f.stat().st_size for f in cache_files)
+    
+    files_info = []
+    for f in cache_files:
+        try:
+            with open(f, 'r') as file:
+                data = json.load(file)
+                files_info.append({
+                    "hash": f.stem,
+                    "size": f.stat().st_size,
+                    "modified": f.stat().st_mtime,
+                    "track": data.get("track", "Unknown"),
+                    "artist": data.get("artist", "Unknown")
+                })
+        except:
+            files_info.append({
+                "hash": f.stem,
+                "size": f.stat().st_size,
+                "modified": f.stat().st_mtime,
+                "track": "Unknown",
+                "artist": "Unknown"
+            })
+    
+    return {
+        "count": len(cache_files),
+        "size": total_size,
+        "files": files_info
+    }
+
+def cleanup_old_cache(days=7):
+    """Remove cache files older than specified days"""
+    if not os.path.exists(CACHE_DIR):
+        return 0
+    
+    current_time = time.time()
+    cutoff_time = current_time - (days * 24 * 60 * 60)
+    removed_count = 0
+    
+    for cache_file in Path(CACHE_DIR).glob("*.json"):
+        try:
+            if cache_file.stat().st_mtime < cutoff_time:
+                cache_file.unlink()
+                removed_count += 1
+        except Exception as e:
+            print(f"Error removing old cache file {cache_file}: {e}")
+    
+    return removed_count
+

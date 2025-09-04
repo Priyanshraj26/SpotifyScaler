@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+from cache_utils import clear_cache, cleanup_old_cache, get_cache_info, clear_specific_cache
 
 def display_disclaimer():
     """Display legal disclaimer"""
@@ -14,37 +15,84 @@ def display_disclaimer():
         """)
 
 def display_sidebar_settings():
-    """Display sidebar settings and return selected options"""
+    """Display sidebar settings with Spotify styling"""
     with st.sidebar:
-        st.header("Input Options")
+        # Logo/Header area
+        st.markdown("""
+            <div style='text-align: center; padding: 20px 0;'>
+                <h2 style='color: #1DB954; margin: 0;'>Settings</h2>
+            </div>
+        """, unsafe_allow_html=True)
         
+        # Input options with custom styling
+        st.markdown("### Input Source")
         input_mode = st.radio(
             "Select input source:",
-            ["Upload Audio File", "Spotify Track", "Spotify Playlist"]
+            ["Upload Audio File", "Spotify Track", "Spotify Playlist"],
+            label_visibility="collapsed"
         )
         
         st.markdown("---")
         
-        # Settings
-        st.subheader("Settings")
-        use_cache = st.checkbox("Use cache for repeated files", value=True)
-        auto_cleanup = st.checkbox("Auto-cleanup after analysis", value=True)
+        # Settings section
+        st.markdown("### ⚙️ Analysis Settings")
         
-        # Advanced settings
-        with st.expander("Advanced Settings"):
+        col1, col2 = st.columns(2)
+        with col1:
+            use_cache = st.checkbox("Use cache", value=True, 
+                                  help="Use cached results for repeated analyses")
+        with col2:
+            auto_cleanup = st.checkbox("Auto-cleanup", value=True,
+                                     help="Automatically delete temporary files")
+        
+        # Advanced settings with Spotify styling
+        with st.expander("Advanced Settings", expanded=False):
             confidence_threshold = st.slider(
-                "Minimum confidence for key detection",
+                "Minimum confidence threshold",
                 min_value=0.0,
                 max_value=1.0,
                 value=0.5,
                 step=0.05,
                 help="Songs below this confidence will show a warning"
             )
+            
+            # Visual confidence indicator
+            if confidence_threshold < 0.3:
+                st.markdown("<small style='color: #F44336;'>⚠️ Very low threshold</small>", 
+                          unsafe_allow_html=True)
+            elif confidence_threshold < 0.5:
+                st.markdown("<small style='color: #FFA500;'>⚠️ Low threshold</small>", 
+                          unsafe_allow_html=True)
+            else:
+                st.markdown("<small style='color: #1DB954;'>✅ Good threshold</small>", 
+                          unsafe_allow_html=True)
+            
             show_alternatives = st.checkbox(
-                "Show alternative key suggestions",
+                "Show alternative keys",
                 value=True,
                 help="Display top 3 possible keys for each track"
             )
+        
+        st.markdown("---")
+        
+        # Cache management
+        display_cache_management()
+        
+        # About section at bottom
+        st.markdown("---")
+        with st.expander("About", expanded=False):
+            st.markdown("""
+                <div style='color: #B3B3B3; font-size: 0.9em;'>
+                    <p><strong>Spotify Key Analyzer</strong></p>
+                    <p>Version 1.0.0</p>
+                    <p>Analyzes musical keys using:</p>
+                    <ul>
+                        <li>spotDL for downloads</li>
+                        <li>librosa for analysis</li>
+                        <li>Enhanced key detection</li>
+                    </ul>
+                </div>
+            """, unsafe_allow_html=True)
         
         return input_mode, use_cache, auto_cleanup, confidence_threshold, show_alternatives
 
@@ -212,7 +260,7 @@ def display_export_tab(df, csv_data, excel_data, json_data):
     with col1:
         # CSV export
         st.download_button(
-            label="📄 Download as CSV",
+            label="Download as CSV",
             data=csv_data,
             file_name=f"key_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv"
@@ -221,7 +269,7 @@ def display_export_tab(df, csv_data, excel_data, json_data):
     with col2:
         # Excel export
         st.download_button(
-            label="📊 Download as Excel",
+            label="Download as Excel",
             data=excel_data,
             file_name=f"key_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -230,8 +278,78 @@ def display_export_tab(df, csv_data, excel_data, json_data):
     # JSON export
     st.subheader("Developer Export")
     st.download_button(
-        label="🔧 Download as JSON",
+        label="Download as JSON",
         data=json_data,
         file_name=f"key_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
         mime="application/json"
     )
+
+
+def display_cache_management():
+    """Display cache management options in sidebar with Spotify styling"""
+    from cache_utils import get_cache_info, clear_cache, cleanup_old_cache, clear_specific_cache
+    
+    with st.expander("Cache Management", expanded=False):
+        cache_info = get_cache_info()
+        
+        # Cache stats with Spotify colors
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Cached Files", cache_info['count'])
+        with col2:
+            size_mb = cache_info['size'] / (1024 * 1024)
+            st.metric("Cache Size", f"{size_mb:.1f} MB")
+        
+        # Action buttons
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("Clear All", type="secondary", use_container_width=True):
+                if clear_cache():
+                    st.success("Cache cleared!")
+                    st.rerun()
+                else:
+                    st.error("❌ Failed to clear")
+        
+        with col2:
+            if st.button("Clear Old", type="secondary", use_container_width=True):
+                removed = cleanup_old_cache(days=7)
+                st.success(f"Removed {removed} files")
+                if removed > 0:
+                    st.rerun()
+        
+        # Show individual cache files
+        if cache_info['count'] > 0:
+            st.markdown("**Recent analyses:**")
+            
+            # Create a scrollable container
+            container = st.container()
+            with container:
+                for file_info in sorted(cache_info['files'], 
+                                      key=lambda x: x['modified'], 
+                                      reverse=True)[:10]:
+                    
+                    # Format timestamp
+                    from datetime import datetime
+                    modified_date = datetime.fromtimestamp(file_info['modified'])
+                    date_str = modified_date.strftime("%Y-%m-%d %H:%M")
+                    
+                    # Display with Spotify styling
+                    col1, col2, col3 = st.columns([3, 2, 1])
+                    
+                    with col1:
+                        track_name = f"{file_info['artist']} - {file_info['track']}"
+                        if len(track_name) > 30:
+                            track_name = track_name[:30] + "..."
+                        st.markdown(f"<small style='color: #B3B3B3;'>{track_name}</small>", 
+                                  unsafe_allow_html=True)
+                    
+                    with col2:
+                        st.markdown(f"<small style='color: #666;'>{date_str}</small>", 
+                                  unsafe_allow_html=True)
+                    
+                    with col3:
+                        if st.button("❌", key=f"del_{file_info['hash']}", 
+                                   help="Delete this cache entry"):
+                            clear_specific_cache(file_info['hash'])
+                            st.rerun()
