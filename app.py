@@ -249,7 +249,7 @@ def handle_file_upload(use_cache, auto_cleanup):
 
 def handle_spotify_input(input_mode, use_cache, auto_cleanup):
     """Handle Spotify URL input"""
-    st.header(f"🎵 Analyze {input_mode}")
+    st.header(f"Analyze {input_mode}")
     
     # Spotify-styled input
     spotify_url = st.text_input(
@@ -260,7 +260,7 @@ def handle_spotify_input(input_mode, use_cache, auto_cleanup):
     
     col1, col2, col3 = st.columns([1, 1, 3])
     with col1:
-        analyze_btn = st.button("🎵 Download & Analyze", type="primary", use_container_width=True)
+        analyze_btn = st.button("Download & Analyze", type="primary", use_container_width=True)
     
     if analyze_btn and spotify_url:
         # Cleanup previous temp files
@@ -274,7 +274,7 @@ def handle_spotify_input(input_mode, use_cache, auto_cleanup):
         
         try:
             # Download from Spotify
-            status_text.text("🎵 Connecting to Spotify...")
+            status_text.text("Connecting to Spotify...")
             progress_bar.progress(0.1)
             
             success, files = download_spotify(spotify_url, TEMP_DIR)
@@ -289,7 +289,7 @@ def handle_spotify_input(input_mode, use_cache, auto_cleanup):
                 def update_progress(current, total):
                     progress = 0.5 + (current / total) * 0.5
                     progress_bar.progress(progress)
-                    status_text.text(f"🎵 Analyzing track {current + 1} of {total}...")
+                    status_text.text(f"Analyzing track {current + 1} of {total}...")
                 
                 results_df = analyze_files(files, progress_callback=update_progress, use_cache=use_cache)
                 
@@ -409,7 +409,7 @@ def display_visualizations_tab(df):
     
     # Additional analysis for playlists
     if len(df) > 2:
-        st.subheader("🎵 Advanced Analysis")
+        st.subheader("Advanced Analysis")
         st.write("**Key Transitions in Playlist Order:**")
         
         transitions_df = calculate_key_transitions(df)
