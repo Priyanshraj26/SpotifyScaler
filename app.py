@@ -21,7 +21,7 @@ from ui_components import (
 # Page config with Spotify theme
 st.set_page_config(
     page_title="Spotify Scaler",
-    page_icon="🎵",
+    page_icon="icon.ico",
     layout="wide",
     initial_sidebar_state="expanded"
 )
